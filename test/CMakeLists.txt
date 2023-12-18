@@ -332,6 +332,15 @@ ngen_add_test(
         NGen::geojson
 )
 
+ngen_add_test(
+    test_hfnetwork
+    OBJECTS
+        core/hf/hf_network_tests.cpp
+    LIBRARIES
+        NGen::core_hf
+        NGen::geopackage
+)
+
 ########################### Netcdf Forcing Tests
 #if(NETCDF_ACTIVE)
 ngen_add_test(
