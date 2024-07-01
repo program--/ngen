@@ -164,6 +164,7 @@ ngen_add_test(
     OBJECTS
         spatial/Geometry_Test.cpp
         spatial/GeoJSON_Test.cpp
+        spatial/WKB_Test.cpp
     LIBRARIES
         NGen::spatial
 )

@@ -11,4 +11,5 @@ target_sources(spatial
         FeatureCollection.cpp
         algorithm/project.cpp
         io/geojson.cpp
+        io/wkb.cpp
 )

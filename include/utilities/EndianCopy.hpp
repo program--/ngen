@@ -1,10 +1,21 @@
-#ifndef NGEN_ENDIANCOPY_H
-#define NGEN_ENDIANCOPY_H
+#pragma once
 
+#include <cstdint>
+#include <cassert>
 #include <boost/endian.hpp>
 #include <boost/core/span.hpp>
 
-namespace utils {
+namespace ngen {
+
+template<typename T>
+void to_native_inplace(boost::endian::order order, T& x)
+{
+    if (order == boost::endian::order::little) {
+        boost::endian::little_to_native_inplace(x);
+    } else {
+        boost::endian::big_to_native_inplace(x);
+    }
+}
 
 /**
  * @brief
@@ -20,38 +31,27 @@ namespace utils {
  * @param order endianness value (0x01 == Little; 0x00 == Big)
  */
 template<typename S>
-void copy_from(const boost::span<const uint8_t> src, int& index, S& dst, uint8_t order)
+S copy_from(boost::span<const uint8_t> src, boost::endian::order order)
 {
-    std::memcpy(&dst, src.data() + index, sizeof(dst));
+    assert(src.size_bytes() >= (src.data() + sizeof(S)) - src.data());
 
-    if (order == 0x01) {
-        boost::endian::little_to_native_inplace(dst);
-    } else {
-        boost::endian::big_to_native_inplace(dst);
-    }
-
-    index += sizeof(S);
+    S dst{};
+    std::memcpy(&dst, src.data(), sizeof(S));
+    to_native_inplace(order, dst);
+    return dst;
 }
 
 // boost::endian doesn't support using primitive doubles
 // see: https://github.com/boostorg/endian/issues/36
 template<>
-inline void copy_from<double>(const boost::span<const uint8_t> src, int& index, double& dst, uint8_t order)
+inline double copy_from<double>(boost::span<const uint8_t> src, boost::endian::order order)
 {
     static_assert(sizeof(uint64_t) == sizeof(double), "sizeof(uint64_t) is not the same as sizeof(double)!");
 
-    uint64_t tmp;
-
-    // copy into uint64_t
-    copy_from(src, index, tmp, order); 
-
-    // copy resolved endianness into double
+    double dst{};
+    uint64_t tmp = copy_from<uint64_t>(src, order);
     std::memcpy(&dst, &tmp, sizeof(double));
-
-    // above call to copy_from handles index
-    // incrementing, so we don't need to.
+    return dst;
 }
 
-}
-
-#endif // NGEN_ENDIANCOPY_H
+} // namespace ngen
