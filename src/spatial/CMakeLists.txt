@@ -9,4 +9,5 @@ target_sources(spatial
         Geometry.cpp
         Feature.cpp
         FeatureCollection.cpp
+        algorithm/project.cpp
 )
