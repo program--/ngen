@@ -7,4 +7,6 @@ target_link_libraries(spatial PUBLIC NGen::config_header Boost::boost)
 target_sources(spatial
     PRIVATE
         Geometry.cpp
+        Feature.cpp
+        FeatureCollection.cpp
 )
