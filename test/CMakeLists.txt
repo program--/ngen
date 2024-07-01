@@ -159,6 +159,14 @@ ngen_add_test(
         NGEN_WITH_SQLITE
 )
 
+ngen_add_test(
+    test_spatial
+    OBJECTS
+        spatial/Geometry_Test.cpp
+    LIBRARIES
+        NGen::spatial
+)
+
 ########################## Realization Config Unit Tests
 ngen_add_test(
     test_realization_config
