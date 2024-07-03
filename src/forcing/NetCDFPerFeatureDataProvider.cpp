@@ -321,8 +321,8 @@ size_t NetCDFPerFeatureDataProvider::get_ts_index_for_time(const time_t &epoch_t
 
 double NetCDFPerFeatureDataProvider::get_value(const CatchmentAggrDataSelector& selector, ReSampleMethod m) 
 {
-    auto init_time = selector.get_init_time();
-    auto stop_time = init_time + selector.get_duration_secs(); // scope hiding! BAD JUJU!
+    auto init_time = selector.init_time.time_since_epoch().count();
+    auto stop_time = (selector.init_time + selector.duration).time_since_epoch().count();
     
     size_t idx1 = get_ts_index_for_time(init_time);
     size_t idx2;
@@ -337,7 +337,7 @@ double NetCDFPerFeatureDataProvider::get_value(const CatchmentAggrDataSelector& 
 
     std::vector<std::size_t> start, count;
 
-    auto cat_pos = id_pos[selector.get_id()];
+    auto cat_pos = id_pos[selector.catchment_id];
 
 
 
@@ -346,9 +346,9 @@ double NetCDFPerFeatureDataProvider::get_value(const CatchmentAggrDataSelector& 
 
     double rvalue = 0.0;
     
-    auto ncvar = get_ncvar(selector.get_variable_name());
+    auto ncvar = get_ncvar(selector.variable_name);
 
-    std::string native_units = get_ncvar_units(selector.get_variable_name());
+    std::string native_units = get_ncvar_units(selector.variable_name);
 
     auto read_len = idx2 - idx1 + 1;
 
@@ -412,7 +412,7 @@ double NetCDFPerFeatureDataProvider::get_value(const CatchmentAggrDataSelector& 
             // the data values where allready scaled for where there was only partial use of a data value
             // so we just need to do a final scale to account for the differnce between time_stride and duration_s
 
-            double scale_factor = (selector.get_duration_secs() > time_stride ) ? (time_stride / selector.get_duration_secs()) : (1.0 / (a + b));
+            double scale_factor = (selector.duration.count() > time_stride ) ? (time_stride / selector.duration.count()) : (1.0 / (a + b));
             rvalue *= scale_factor;
         }
         break;
@@ -423,7 +423,7 @@ double NetCDFPerFeatureDataProvider::get_value(const CatchmentAggrDataSelector& 
 
     try 
     {
-        return UnitsHelper::get_converted_value(native_units, rvalue, selector.get_output_units());
+        return UnitsHelper::get_converted_value(native_units, rvalue, selector.output_units);
     }
     catch (const std::runtime_error& e)
     {
