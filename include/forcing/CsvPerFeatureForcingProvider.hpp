@@ -114,10 +114,10 @@ class CsvPerFeatureForcingProvider : public data_access::GenericDataProvider
     double get_value(const CatchmentAggrDataSelector& selector, data_access::ReSampleMethod m) override
     {
         size_t current_index;
-        long time_remaining = selector.get_duration_secs();
-        auto init_time = selector.get_init_time();
-        auto output_name = selector.get_variable_name();
-        auto output_units = selector.get_output_units();
+        auto time_remaining = selector.duration.count();
+        auto init_time = selector.init_time.time_since_epoch().count();
+        const auto& output_name = selector.variable_name;
+        const auto& output_units = selector.output_units;
 
         try {
             current_index = get_ts_index_for_time(init_time);
@@ -156,7 +156,7 @@ class CsvPerFeatureForcingProvider : public data_access::GenericDataProvider
             if (is_param_sum_over_time_step(output_name))
                 value += involved_time_step_values[i] * ((double)involved_time_step_seconds[i] / 3600.0);
             else
-                value += involved_time_step_values[i] * ((double)involved_time_step_seconds[i] / (double)selector.get_duration_secs());
+                value += involved_time_step_values[i] * ((double)involved_time_step_seconds[i] / (double)selector.duration.count());
         }
 
         // Convert units
