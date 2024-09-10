@@ -294,6 +294,26 @@ ngen_add_test(
         NGEN_WITH_BMI_FORTRAN
 )
 
+ngen_add_test(
+    test_model_cpp
+    OBJECTS
+        bmi/ModelCppTest.cpp
+    LIBRARIES
+        NGen::ngen_bmi
+    DEPENDS
+        testbmicppmodel
+)
+
+ngen_add_test(
+    test_model_python
+    OBJECTS
+        bmi/ModelPythonTest.cpp
+    LIBRARIES
+        NGen::ngen_bmi
+    REQUIRES
+        NGEN_WITH_PYTHON
+)
+
 
 ########################## BMI C++ Tests
 ngen_add_test(

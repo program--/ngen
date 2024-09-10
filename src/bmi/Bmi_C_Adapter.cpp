@@ -1,451 +1,413 @@
 #include "bmi/Bmi_C_Adapter.hpp"
+#include "Bmi_Adapter.hpp"
 
-#include <exception>
-#include <utility>
+#include <array>
 
-using namespace models::bmi;
+#define BMI_THROW_ON_FAILURE(EXPR, MSG)    \
+    do {                                   \
+        if ((EXPR) != BMI_SUCCESS)        \
+            throw std::runtime_error{(MSG)}; \
+    } while(0)
 
-/**
- * Public constructor without path to BMI initialization config file.
- *
- * @param type_name The name of the backing BMI module/model type.
- * @param library_file_path The string path to the shared library file for external module.
- * @param has_fixed_time_step Whether the model has a fixed time step size.
- * @param registration_func The name for the @see bmi_registration_function.
- */
-Bmi_C_Adapter::Bmi_C_Adapter(const std::string &type_name, std::string library_file_path,
-                             bool has_fixed_time_step,
-                             const std::string& registration_func)
-        : Bmi_C_Adapter(type_name, std::move(library_file_path), "",
-                        has_fixed_time_step, registration_func) { }
+namespace ngen {
 
-/**
- * Main public constructor.
- *
- * @param type_name The name of the backing BMI module/model type.
- * @param library_file_path The string path to the shared library file for external module.
- * @param bmi_init_config The string path to the BMI initialization config file for the module.
- * @param has_fixed_time_step Whether the model has a fixed time step size.
- * @param registration_func The name for the @see bmi_registration_function.
- */
-Bmi_C_Adapter::Bmi_C_Adapter(const std::string &type_name, std::string library_file_path, std::string bmi_init_config,
-                             bool has_fixed_time_step,
-                             std::string registration_func)
-        : Bmi_C_Adapter(type_name, std::move(library_file_path), std::move(bmi_init_config),
-                        has_fixed_time_step,
-                        std::move(registration_func), true) { }
+using Adapter = Bmi_C_Adapter;
 
-/**
- * Protected constructor that allows control over whether initialization steps are done during construction.
- *
- * Constructor that has parameter to control whether initialization steps - i.e., steps that would be
- * performed in the BMI @see Initialize(std::string) function if not already done - are done when
- * constructing the object.
- *
- * In general, it is assumed that an object of this type will be initialized on construction.  However, a
- * subtype may wish to utilize the constructor while deferring initialization (usually so it can perform
- * that internally as a later step).
- *
- * @param type_name The name of the backing BMI module/model type.
- * @param library_file_path The string path to the shared library file for external module.
- * @param bmi_init_config The string path to the BMI initialization config file for the module.
- * @param has_fixed_time_step Whether the model has a fixed time step size.
- * @param registration_func The name for the @see bmi_registration_function.
- * @param do_initialization Whether initialization should be performed during construction or deferred.
- */
-Bmi_C_Adapter::Bmi_C_Adapter(const std::string &type_name, std::string library_file_path, std::string bmi_init_config,
-                             bool has_fixed_time_step,
-                             std::string registration_func, bool do_initialization)
-                             : AbstractCLibBmiAdapter(type_name, library_file_path, std::move(bmi_init_config),
-                             has_fixed_time_step, registration_func)
+void Adapter::construct_backing_model()
 {
-    if (do_initialization) {
-        try {
-            construct_and_init_backing_model_for_type();
-            // Make sure this is set to 'true' after this function call finishes
-            model_initialized = true;
-            bmi_model_time_convert_factor = get_time_convert_factor();
-        }
-        // Record the exception message before re-throwing to handle subsequent function calls properly
-        catch( models::external::State_Exception& e)
-        {
-            model_initialized = true;
-            throw e;
-        }
-        catch( ::external::ExternalIntegrationException& e)
-        {
-            model_initialized = true;
-            throw e;
-        }
-        catch( std::runtime_error& e)
-        {
-            model_initialized = true;
-            throw e;
-        }
-        catch (std::exception& e) {
-            // Make sure this is set to 'true' after this function call finishes
-            model_initialized = true;
-            throw e;
-        }
-    }
+    using registration_func_t = detail::CBmi* (*)(detail::CBmi*);
+    auto register_ = reinterpret_cast<registration_func_t>(this->registration());
+    ptr_ = std::make_unique<detail::CBmi>();
+    register_(ptr_.get());
 }
 
-// TODO: since the dynamically loaded lib and model struct can't easily be copied (without risking breaking once
-//  original object closes the handle for its dynamically loaded lib) it make more sense to remove the copy constructor.
-// TODO: However, it may make sense to bring it back once it is possible to serialize and deserialize the model.
-/*
-Bmi_C_Adapter::Bmi_C_Adapter(Bmi_C_Adapter &adapter) : model_name(adapter.model_name),
-                                                       bmi_init_config(adapter.bmi_init_config),
-                                                       bmi_lib_file(adapter.bmi_lib_file),
-                                                       bmi_model(adapter.bmi_model),
-                                                       bmi_model_has_fixed_time_step(
-                                                               adapter.bmi_model_has_fixed_time_step),
-                                                       bmi_model_time_convert_factor(
-                                                               adapter.bmi_model_time_convert_factor),
-                                                       bmi_registration_function(adapter.bmi_registration_function),
-                                                       init_exception_msg(adapter.init_exception_msg),
-                                                       input_var_names(adapter.input_var_names),
-                                                       model_initialized(adapter.model_initialized),
-                                                       output_var_names(adapter.output_var_names),
-                                                       output(std::move(adapter.output))
+void Adapter::Initialize(std::string config_file)
 {
-    // TODO: simple copying of the open dynamic library handle may lead to unexpected behavior, so perhaps open new?
+    BMI_THROW_ON_FAILURE(
+        ptr_->initialize(ptr_.get(), config_file.c_str()),
+        "Failed to initialize Bmi_C_Adapter with file '" + config_file + "'."
+    );
 
-    // TODO: for that matter, copying the model struct as was done before probably is not valid and should really
-         involve serialization/deserialization.
-}
-*/
-
-std::string Bmi_C_Adapter::GetComponentName() {
-    char component_name[BMI_MAX_COMPONENT_NAME];
-    if (bmi_model->get_component_name(bmi_model.get(), component_name) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model component name.");
-    }
-    return {component_name};
+    Bmi_Adapter::set_initialized();
 }
 
-double Bmi_C_Adapter::GetCurrentTime() {
-    double current_time;
-    int result = bmi_model->get_current_time(bmi_model.get(), &current_time);
-    if (result != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get current model time.");
-    }
-    return current_time;
+void Adapter::Update()
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->update(ptr_.get()),
+        "Failed to update Bmi_C_Adapter."
+    );
 }
 
-double Bmi_C_Adapter::GetEndTime() {
-    double end_time;
-    int result = bmi_model->get_end_time(bmi_model.get(), &end_time);
-    if (result != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model end time.");
-    }
-    return end_time;
+void Adapter::UpdateUntil(double time)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->update_until(ptr_.get(), time),
+        "Failed to update Bmi_C_Adapter until time '" + std::to_string(time) + "'."
+    );
 }
 
-int Bmi_C_Adapter::GetInputItemCount() {
-    return GetInputVarNames().size();
+void Adapter::Finalize()
+{
+    ptr_->finalize(ptr_.get()); // Throw on failure?
 }
 
-std::vector<std::string> Bmi_C_Adapter::GetInputVarNames() {
-    if (input_var_names == nullptr) {
-        input_var_names = inner_get_variable_names(true);
-    }
+std::string Adapter::GetComponentName()
+{
+    std::array<char, BMI_MAX_COMPONENT_NAME> name;
 
-    return *input_var_names;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_component_name(ptr_.get(), name.data()),
+        "Failed to get component name for Bmi_C_Adapter."
+    );
+
+    return { name.data() };
 }
 
-int Bmi_C_Adapter::GetOutputItemCount() {
-    return GetOutputVarNames().size();
+int Adapter::GetInputItemCount()
+{
+    int item_count = 0;
+
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_input_item_count(ptr_.get(), &item_count),
+        "Failed to get input item count for Bmi_C_Adapter."
+    );
+
+    return item_count;
 }
 
-std::vector<std::string> Bmi_C_Adapter::GetOutputVarNames() {
-    if (output_var_names == nullptr) {
-        output_var_names = inner_get_variable_names(false);
-    }
+int Adapter::GetOutputItemCount()
+{
+    int item_count = 0;
 
-    return *output_var_names;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_output_item_count(ptr_.get(), &item_count),
+        "Failed to get output item count for Bmi_C_Adapter."
+    );
+
+    return item_count;
 }
 
-double Bmi_C_Adapter::GetStartTime() {
-    double start_time;
-    int result = bmi_model->get_start_time(bmi_model.get(), &start_time);
-    if (result != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model start time.");
+
+std::vector<std::string> GetVarName(detail::CBmi* ptr, int (*func)(detail::CBmi*, char**), int count, bool is_input)
+{
+    std::vector<char*> names(count);
+
+    for (int i = 0; i < count; ++i)
+        names[i] = new char[BMI_MAX_VAR_NAME];
+
+    BMI_THROW_ON_FAILURE(
+        func(ptr, names.data()),
+        "Failed to get " + std::string{is_input ? "input" : "output"} + " variable names for Bmi_C_Adapter"
+    );
+
+    std::vector<std::string> result;
+    result.reserve(count);
+
+    for (int i = 0; i < count; ++i) {
+        result.emplace_back(names[i]);
+        delete[] names[i];
     }
-    return start_time;
+
+    return result;
 }
 
-std::string Bmi_C_Adapter::GetTimeUnits() {
-    char time_units_cstr[BMI_MAX_UNITS_NAME];
-    int result = bmi_model->get_time_units(bmi_model.get(), time_units_cstr);
-    if (result != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to read time units from model.");
-    }
-    return std::string(time_units_cstr);
+std::vector<std::string> Adapter::GetInputVarNames()
+{
+    return GetVarName(ptr_.get(), ptr_->get_input_var_names, GetInputItemCount(), true);
 }
 
-void Bmi_C_Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count) {
-    if (bmi_model->get_value_at_indices(bmi_model.get(), name.c_str(), dest, inds, count) != BMI_SUCCESS) {
-        throw models::external::State_Exception(model_name + " failed to get variable " + name + " from model.");
-    }
+std::vector<std::string> Adapter::GetOutputVarNames()
+{
+    return GetVarName(ptr_.get(), ptr_->get_output_var_names, GetOutputItemCount(), false);
 }
 
-int Bmi_C_Adapter::GetVarItemsize(std::string name) {
-    int size;
-    int success = bmi_model->get_var_itemsize(bmi_model.get(), name.c_str(), &size);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable item size for " + name + ".");
-    }
-    return size;
+int Adapter::GetVarGrid(std::string name)
+{
+    int grid_id = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_grid(ptr_.get(), name.c_str(), &grid_id),
+        "Failed to get var grid for variable " + name + " in Bmi_C_Adapter"
+    );
+    return grid_id;
 }
 
-int Bmi_C_Adapter::GetVarNbytes(std::string name) {
-    int size;
-    int success = bmi_model->get_var_nbytes(bmi_model.get(), name.c_str(), &size);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable array size (i.e., nbytes) for " + name + ".");
-    }
-    return size;
+std::string Adapter::GetVarType(std::string name)
+{
+    std::array<char, BMI_MAX_TYPE_NAME> var_type;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_type(ptr_.get(), name.c_str(), var_type.data()),
+        "Failed to get type for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { var_type.data() };
 }
 
-std::string Bmi_C_Adapter::GetVarType(std::string name) {
-    char type_c_str[BMI_MAX_TYPE_NAME];
-    int success = bmi_model->get_var_type(bmi_model.get(), name.c_str(), type_c_str);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable type for " + name + ".");
-    }
-    return std::string(type_c_str);
+std::string Adapter::GetVarUnits(std::string name)
+{
+    std::array<char, BMI_MAX_UNITS_NAME> units_name;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_units(ptr_.get(), name.c_str(), units_name.data()),
+        "Failed to get units for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { units_name.data() };
 }
 
-std::string Bmi_C_Adapter::GetVarUnits(std::string name) {
-    char units_c_str[BMI_MAX_UNITS_NAME];
-    int success = bmi_model->get_var_units(bmi_model.get(), name.c_str(), units_c_str);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable units for " + name + ".");
-    }
-    return std::string(units_c_str);
+int Adapter::GetVarItemsize(std::string name)
+{
+    int item_size = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_itemsize(ptr_.get(), name.c_str(), &item_size),
+        "Failed to get item size for variable " + name + " in Bmi_C_Adapter"
+    );
+    return item_size;
 }
 
-std::string Bmi_C_Adapter::GetVarLocation(std::string name) {
-    char location_c_str[BMI_MAX_LOCATION_NAME];
-    int success = bmi_model->get_var_location(bmi_model.get(), name.c_str(), location_c_str);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable location for " + name + ".");
-    }
-    return std::string(location_c_str);
+int Adapter::GetVarNbytes(std::string name)
+{
+    int nbytes = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_nbytes(ptr_.get(), name.c_str(), &nbytes),
+        "Failed to get nbytes for variable " + name + " in Bmi_C_Adapter"
+    );
+    return nbytes;
 }
 
-int Bmi_C_Adapter::GetVarGrid(std::string name) {
-    int grid;
-    int success = bmi_model->get_var_grid(bmi_model.get(), name.c_str(), &grid);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable grid for " + name + ".");
-    }
-    return grid;
+std::string Adapter::GetVarLocation(std::string name)
+{
+    std::array<char, BMI_MAX_LOCATION_NAME> loc;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_var_location(ptr_.get(), name.c_str(), loc.data()),
+        "Failed to get location for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { loc.data() };
 }
 
-std::string Bmi_C_Adapter::GetGridType(int grid_id) {
-    char gridtype_c_str[BMI_MAX_TYPE_NAME];
-    int success = bmi_model->get_grid_type(bmi_model.get(), grid_id, gridtype_c_str);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid type for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return std::string(gridtype_c_str);
+double Adapter::GetCurrentTime()
+{
+    double current = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_current_time(ptr_.get(), &current),
+        "Failed to get current time in Bmi_C_Adapter"
+    );
+    return current;
 }
 
-int Bmi_C_Adapter::GetGridRank(int grid_id) {
-    int gridrank;
-    int success = bmi_model->get_grid_rank(bmi_model.get(), grid_id, &gridrank);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid rank for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return gridrank;
+double Adapter::GetStartTime()
+{
+    double start = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_start_time(ptr_.get(), &start),
+        "Failed to get start time in Bmi_C_Adapter"
+    );
+    return start;
 }
 
-int Bmi_C_Adapter::GetGridSize(int grid_id) {
-    int gridsize;
-    int success = bmi_model->get_grid_size(bmi_model.get(), grid_id, &gridsize);
-    if (success != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid size for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return gridsize;
+double Adapter::GetEndTime()
+{
+    double end = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_end_time(ptr_.get(), &end),
+        "Failed to get end time in Bmi_C_Adapter"
+    );
+    return end;
 }
 
-std::shared_ptr<std::vector<std::string>> Bmi_C_Adapter::inner_get_variable_names(bool is_input_variables) {
-    // Writing this def once here at beginning: fewer lines, but this may or may not be used.
-    std::string varType = (is_input_variables) ? "input" : "output";
-
-    // Obtain this via inner functions, which should use the model directly and not other member functions
-    int variableCount;
-    try {
-        variableCount = (is_input_variables) ? inner_get_input_item_count() : inner_get_output_item_count();
-    }
-    catch (const std::exception &e) {
-        throw std::runtime_error(model_name + " failed to count of " + varType + " variable names array.");
-    }
-
-    // With variable count now obtained, create the vector
-    std::shared_ptr<std::vector<std::string>> var_names = std::make_shared<std::vector<std::string>>(
-            std::vector<std::string>(variableCount));
-
-    // Must get the names from the model as an array of C strings
-    std::vector<char*> names_array(variableCount);
-    // ... but allocate the space for the individual C strings (i.e., the char * elements)
-    for (int i = 0; i < variableCount; i++) {
-        names_array[i] = static_cast<char *>(malloc(sizeof(char) * BMI_MAX_VAR_NAME));
-    }
-
-    // With the necessary char** in hand, get the names from the model
-    int names_result;
-    if (is_input_variables) {
-        names_result = bmi_model->get_input_var_names(bmi_model.get(), names_array.data());
-    }
-    else {
-        names_result = bmi_model->get_output_var_names(bmi_model.get(), names_array.data());
-    }
-    if (names_result != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get array of output variables names.");
-    }
-
-    // Then convert from array of C strings to vector of strings, freeing the allocated space as we go
-    for (int i = 0; i < variableCount; ++i) {
-        (*var_names)[i] = std::string(names_array[i]);
-        free(names_array[i]);
-    }
-
-    return var_names;
+std::string Adapter::GetTimeUnits()
+{
+    std::array<char, BMI_MAX_UNITS_NAME> units;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_time_units(ptr_.get(), units.data()),
+        "Failed to get time units in Bmi_C_Adapter"
+    );
+    return { units.data() };
+}
+double Adapter::GetTimeStep()
+{
+    double step = -1;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_time_step(ptr_.get(), &step),
+        "Failed to get time step in Bmi_C_Adapter"
+    );
+    return step;
 }
 
-void Bmi_C_Adapter::SetValue(std::string name, void *src) {
-    int result = bmi_model->set_value(bmi_model.get(), name.c_str(), src);
-    if (result != BMI_SUCCESS) {
-        throw models::external::State_Exception("Failed to set values of " + name + " variable for " + model_name);
-    }
+void Adapter::GetValue(std::string name, void *dest)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_value(ptr_.get(), name.c_str(), dest),
+        "Failed to get value for variable " + name + " in Bmi_C_Adapter"
+    );
 }
 
-bool Bmi_C_Adapter::is_model_initialized() {
-    return model_initialized;
+void *Adapter::GetValuePtr(std::string name)
+{
+    void* dest = nullptr;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_value_ptr(ptr_.get(), name.c_str(), &dest),
+        "Failed to get value pointer for variable " + name + " in Bmi_C_Adapter"
+    );
+    return dest;
 }
 
-void Bmi_C_Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src) {
-    int result = bmi_model->set_value_at_indices(bmi_model.get(), name.c_str(), inds, count, src);
-    if (result != BMI_SUCCESS) {
-        throw models::external::State_Exception(
-                "Failed to set specified indexes for " + name + " variable of " + model_name);
-    }
+void Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_value_at_indices(ptr_.get(), name.c_str(), dest, inds, count),
+        "Failed to get value at indices for variable " + name + " in Bmi_C_Adapter"
+    );
 }
 
-/**
- * Have the backing model update to next time step.
- *
- * Have the backing BMI model perform an update to the next time step according to its own internal time keeping.
- */
-void Bmi_C_Adapter::Update() {
-    int result = bmi_model->update(bmi_model.get());
-    if (result != BMI_SUCCESS) {
-        throw models::external::State_Exception("BMI C model execution update failed for " + model_name);
-    }
+void Adapter::SetValue(std::string name, void *src)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->set_value(ptr_.get(), name.c_str(), src),
+        "Failed to set value for variable " + name + " in Bmi_C_Adapter"
+    );
 }
 
-/**
- * Have the backing BMI model update to the specified time.
- *
- * Update the backing BMI model to some desired model time, specified either explicitly or implicitly as a
- * non-integral multiple of time steps.  Note that the former is supported, but not required, by the BMI
- * specification.  The same is true for negative argument values.
- *
- * This function does not attempt to determine whether the particular backing model will consider the
- * provided parameter valid.
- *
- * @param time Time to update model to, either as literal model time or non-integral multiple of time steps.
- */
-void Bmi_C_Adapter::UpdateUntil(double time) {
-    int result = bmi_model->update_until(bmi_model.get(), time);
-    if (result != BMI_SUCCESS) {
-        throw models::external::State_Exception("Model execution update to specified time failed for " + model_name);
-    }
+void Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->set_value_at_indices(ptr_.get(), name.c_str(), inds, count, src),
+        "Failed to set value at indices for variable " + name + " in Bmi_C_Adapter"
+    );
 }
 
-void Bmi_C_Adapter::GetGridShape(const int grid, int *shape) {
-    if (bmi_model->get_grid_shape(bmi_model.get(), grid, shape) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " shape.");
-    }
+int Adapter::GetGridRank(const int grid)
+{
+    int grid_rank = 0;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_rank(ptr_.get(), grid, &grid_rank),
+        "Failed to get rank of grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
+    return grid_rank;
 }
 
-void Bmi_C_Adapter::GetGridSpacing(const int grid, double *spacing) {
-    if (bmi_model->get_grid_spacing(bmi_model.get(), grid, spacing) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " spacing.");
-    }
+int Adapter::GetGridSize(const int grid)
+{
+    int grid_size = 0;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_size(ptr_.get(), grid, &grid_size),
+        "Failed to get size of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+    return grid_size;
 }
 
-void Bmi_C_Adapter::GetGridOrigin(const int grid, double *origin) {
-    if (bmi_model->get_grid_origin(bmi_model.get(), grid, origin) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " origin.");
-    }
+std::string Adapter::GetGridType(const int grid)
+{
+    std::array<char, BMI_MAX_TYPE_NAME> grid_type;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_type(ptr_.get(), grid, grid_type.data()),
+        "Failed to get type of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+    return { grid_type.data() };
 }
 
-void Bmi_C_Adapter::GetGridX(const int grid, double *x) {
-    if (bmi_model->get_grid_x(bmi_model.get(), grid, x) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " x.");
-    }
+void Adapter::GetGridShape(const int grid, int *shape)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_shape(ptr_.get(), grid, shape),
+        "Failed to get shape of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-void Bmi_C_Adapter::GetGridY(const int grid, double *y) {
-    if (bmi_model->get_grid_y(bmi_model.get(), grid, y) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " y.");
-    }
+void Adapter::GetGridSpacing(const int grid, double *spacing)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_spacing(ptr_.get(), grid, spacing),
+        "Failed to get spacing of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-void Bmi_C_Adapter::GetGridZ(const int grid, double *z) {
-    if (bmi_model->get_grid_z(bmi_model.get(), grid, z) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " z.");
-    }
+void Adapter::GetGridOrigin(const int grid, double *origin)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_origin(ptr_.get(), grid, origin),
+        "Failed to get origin for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-int Bmi_C_Adapter::GetGridNodeCount(const int grid) {
-    int count;
-    if (bmi_model->get_grid_node_count(bmi_model.get(), grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " node count.");
-    }
+void Adapter::GetGridX(const int grid, double *x)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_x(ptr_.get(), grid, x),
+        "Failed to get x for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridY(const int grid, double *y)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_y(ptr_.get(), grid, y),
+        "Failed to get y for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridZ(const int grid, double *z)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_z(ptr_.get(), grid, z),
+        "Failed to get z for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+int Adapter::GetGridNodeCount(const int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_node_count(ptr_.get(), grid, &count),
+        "Failed to get node count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-int Bmi_C_Adapter::GetGridEdgeCount(const int grid) {
-    int count;
-    if (bmi_model->get_grid_edge_count(bmi_model.get(), grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " edge count.");
-    }
+int Adapter::GetGridEdgeCount(const int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_edge_count(ptr_.get(), grid, &count),
+        "Failed to get edge count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-int Bmi_C_Adapter::GetGridFaceCount(const int grid) {
-    int count;
-    if (bmi_model->get_grid_face_count(bmi_model.get(), grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face count.");
-    }
+int Adapter::GetGridFaceCount(const int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_face_count(ptr_.get(), grid, &count),
+        "Failed to get face count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-void Bmi_C_Adapter::GetGridEdgeNodes(const int grid, int *edge_nodes) {
-    if (bmi_model->get_grid_edge_nodes(bmi_model.get(), grid, edge_nodes) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " edge nodes.");
-    }
+void Adapter::GetGridEdgeNodes(const int grid, int *edge_nodes)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_edge_nodes(ptr_.get(), grid, edge_nodes),
+        "Failed to get edge nodes for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridFaceEdges(const int grid, int *face_edges)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_face_edges(ptr_.get(), grid, face_edges),
+        "Failed to get face edges for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridFaceNodes(const int grid, int *face_nodes)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_face_nodes(ptr_.get(), grid, face_nodes),
+        "Failed to get face nodes for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridNodesPerFace(const int grid, int *nodes_per_face)
+{
+    BMI_THROW_ON_FAILURE(
+        ptr_->get_grid_nodes_per_face(ptr_.get(), grid, nodes_per_face),
+        "Failed to get nodes per face for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-void Bmi_C_Adapter::GetGridFaceEdges(const int grid, int *face_edges) {
-    if (bmi_model->get_grid_face_edges(bmi_model.get(), grid, face_edges) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face edges.");
-    }
-}
-
-void Bmi_C_Adapter::GetGridFaceNodes(const int grid, int *face_nodes) {
-    if (bmi_model->get_grid_face_nodes(bmi_model.get(), grid, face_nodes) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face nodes.");
-    }
-}
-
-void Bmi_C_Adapter::GetGridNodesPerFace(const int grid, int *nodes_per_face) {
-    if (bmi_model->get_grid_nodes_per_face(bmi_model.get(), grid, nodes_per_face) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " nodes per face.");
-    }
-}
+} // namespace ngen

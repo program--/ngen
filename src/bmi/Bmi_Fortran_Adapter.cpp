@@ -1,285 +1,497 @@
-#include <NGenConfig.h>
-
-#if NGEN_WITH_BMI_FORTRAN
 #include "bmi/Bmi_Fortran_Adapter.hpp"
 
-using namespace models::bmi;
+#include <array>
 
-std::string Bmi_Fortran_Adapter::GetComponentName() {
-    char component_name[BMI_MAX_COMPONENT_NAME];
-    if (get_component_name(&bmi_model->handle, component_name) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model component name.");
-    }
-    return {component_name};
-}
-
-double Bmi_Fortran_Adapter::GetCurrentTime() {
-    double current_time;
-    if (get_current_time(&bmi_model->handle, &current_time) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get current model time.");
-    }
-    return current_time;
-}
-
-double Bmi_Fortran_Adapter::GetEndTime() {
-    double end_time;
-    if (get_end_time(&bmi_model->handle, &end_time) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model end time.");
-    }
-    return end_time;
-}
-
-std::vector<std::string> Bmi_Fortran_Adapter::GetInputVarNames() {
-    if (input_var_names == nullptr) {
-        input_var_names = inner_get_variable_names(true);
-    }
-    return *input_var_names;
-}
-
-std::vector<std::string> Bmi_Fortran_Adapter::GetOutputVarNames() {
-    if (output_var_names == nullptr) {
-        output_var_names = inner_get_variable_names(false);
-    }
-    return *output_var_names;
-}
-
-double Bmi_Fortran_Adapter::GetStartTime() {
-    double start_time;
-    if (get_start_time(&bmi_model->handle, &start_time) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model start time.");
-    }
-    return start_time;
-}
-
-double Bmi_Fortran_Adapter::GetTimeStep() {
-    // TODO: go back and revisit this
-    //return *get_bmi_model_time_step_size_ptr();
-    double ts;
-    if (get_time_step(&bmi_model->handle, &ts) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get model time step size.");
-    }
-    return ts;
-}
-
-std::string Bmi_Fortran_Adapter::GetTimeUnits() {
-    char time_units_cstr[BMI_MAX_UNITS_NAME];
-    if (get_time_units(&bmi_model->handle, time_units_cstr) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to read time units from model.");
-    }
-    return {time_units_cstr};
-}
-
-void Bmi_Fortran_Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count) {
-    // TODO: implement later by manually handling index convertion on this level.
-    /*
-    if (get_value_at_indices(&bmi_model->handle, name.c_str(), dest, inds, count) != BMI_SUCCESS) {
-        throw models::external::State_Exception(
-                model_name + " failed to get variable " + name + " for " + std::to_string(count) +
-                " indices.");
-    }
-     */
-    throw std::runtime_error("Fortran BMI module integration does not currently support getting values by index");
-}
-
-int Bmi_Fortran_Adapter::GetVarItemsize(std::string name) {
-    int size;
-    if (get_var_itemsize(&bmi_model->handle, name.c_str(), &size) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable item size for " + name + ".");
-    }
-    return size;
-}
-
-int Bmi_Fortran_Adapter::GetVarNbytes(std::string name) {
-    int size;
-    if (get_var_nbytes(&bmi_model->handle, name.c_str(), &size) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable array size (i.e., nbytes) for " + name + ".");
-    }
-    return size;
-}
-
-std::string Bmi_Fortran_Adapter::GetVarType(std::string name) {
-    return inner_get_var_type(name);
-}
-
-std::string Bmi_Fortran_Adapter::GetVarUnits(std::string name) {
-    char units_c_str[BMI_MAX_UNITS_NAME];
-    if (get_var_units(&bmi_model->handle, name.c_str(), units_c_str) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable units for " + name + ".");
-    }
-    return std::string(units_c_str);
-}
-
-std::string Bmi_Fortran_Adapter::GetVarLocation(std::string name) {
-    char location_c_str[BMI_MAX_LOCATION_NAME];
-    if (get_var_location(&bmi_model->handle, name.c_str(), location_c_str) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable location for " + name + ".");
-    }
-    return std::string(location_c_str);
-}
-
-int Bmi_Fortran_Adapter::GetVarGrid(std::string name) {
-    int grid;
-    if (get_var_grid(&bmi_model->handle, name.c_str(), &grid) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get variable grid for " + name + ".");
-    }
-    return grid;
-}
-
-std::string Bmi_Fortran_Adapter::GetGridType(int grid_id) {
-    char gridtype_c_str[BMI_MAX_TYPE_NAME];
-    if (get_grid_type(&bmi_model->handle, &grid_id, gridtype_c_str) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid type for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return std::string(gridtype_c_str);
-}
-
-int Bmi_Fortran_Adapter::GetGridRank(int grid_id) {
-    int gridrank;
-    if (get_grid_rank(&bmi_model->handle, &grid_id, &gridrank) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid rank for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return gridrank;
-}
-
-int Bmi_Fortran_Adapter::GetGridSize(int grid_id) {
-    int gridsize;
-    if (get_grid_size(&bmi_model->handle, &grid_id, &gridsize) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid size for grid ID " + std::to_string(grid_id) + ".");
-    }
-    return gridsize;
-}
-
-void Bmi_Fortran_Adapter::SetValue(std::string name, void *src) {
-    inner_set_value(name, src);
-}
-
-bool Bmi_Fortran_Adapter::is_model_initialized() {
-    return model_initialized;
-}
-
-void Bmi_Fortran_Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src) {
-    // TODO: implement later by manually handling index convertion on this level.
-    /*
-    int result = set_value_at_indices(&bmi_model->handle, name.c_str(), inds, count, src);
-    if (result != BMI_SUCCESS) {
-        throw models::external::State_Exception(
-                "Failed to set specified indexes for " + name + " variable of " + model_name);
-    }
-    */
-    throw std::runtime_error("Fortran BMI module integration does not currently support setting values by index");
-}
+#define BMI_THROW_ON_FAILURE(EXPR, MSG)    \
+    do {                                   \
+        if ((EXPR) != bmi::BMI_SUCCESS)        \
+            throw std::runtime_error{(MSG)}; \
+    } while(0)
 
 /**
- * Have the backing model update to next time step.
+ * The extern free functions from the Nextgen common Fortran static library for integrating with Fortran BMI modules.
+ * 
+ * Each declaration corresponds to a free proxy function in the common integration library.  Every proxy function in 
+ * turn corresponds to some BMI function, which in the Fortran module is expected to be implemented as a procedure on 
+ * some Fortran object.  A proxy function will accept an opaque handle to the Fortran object, along with the other
+ * expected arguments to the corresponding BMI function procedure.  The proxy then calls the appropriate procedure on
+ * the passed Fortran BMI object.
  *
- * Have the backing BMI model perform an update to the next time step according to its own internal time keeping.
+ * Functions provide Fortran interoperability via iso_c_binding module, and thus appear hear as C functions.
  */
-void Bmi_Fortran_Adapter::Update() {
-    if (update(&bmi_model->handle) != BMI_SUCCESS) {
-        throw models::external::State_Exception("BMI C model execution update failed for " + model_name);
-    }
-}
+extern "C" {
+extern int initialize(void *fortran_bmi_handle, const char *config_file);
+extern int update(void *fortran_bmi_handle);
+extern int update_until(void *fortran_bmi_handle, double *then);
+extern int finalize(void *fortran_bmi_handle);
+extern int get_component_name(void *fortran_bmi_handle, char *name);
+extern int get_input_item_count(void *fortran_bmi_handle, int *count);
+extern int get_output_item_count(void *fortran_bmi_handle, int *count);
+extern int get_input_var_names(void *fortran_bmi_handle, char **names);
+extern int get_output_var_names(void *fortran_bmi_handle, char **names);
+extern int get_var_grid(void *fortran_bmi_handle, const char *name, int *grid);
+extern int get_var_type(void *fortran_bmi_handle, const char *name, char *type);
+extern int get_var_units(void *fortran_bmi_handle, const char *name, char *units);
+extern int get_var_itemsize(void *fortran_bmi_handle, const char *name, int *size);
+extern int get_var_nbytes(void *fortran_bmi_handle, const char *name, int *nbytes);
+extern int get_var_location(void *fortran_bmi_handle, const char *name, char *location);
+extern int get_current_time(void *fortran_bmi_handle, double *time);
+extern int get_start_time(void *fortran_bmi_handle, double *time);
+extern int get_end_time(void *fortran_bmi_handle, double *time);
+extern int get_time_units(void *fortran_bmi_handle, char *units);
+extern int get_time_step(void *fortran_bmi_handle, double *time_step);
+extern int get_value_int(void *fortran_bmi_handle, const char *name, int *dest);
+extern int get_value_float(void *fortran_bmi_handle, const char *name, float *dest);
+extern int get_value_double(void *fortran_bmi_handle, const char *name, double *dest);
+extern int set_value_int(void *fortran_bmi_handle, const char *name, int *src);
+extern int set_value_float(void *fortran_bmi_handle, const char *name, float *src);
+extern int set_value_double(void *fortran_bmi_handle, const char *name, double *src);
+extern int get_grid_rank(void *fortran_bmi_handle, int *grid, int *rank);
+extern int get_grid_size(void *fortran_bmi_handle, int *grid, int *size);
+extern int get_grid_type(void *fortran_bmi_handle, int *grid, char *type);
+extern int get_grid_shape(void *fortran_bmi_handle, int *grid, int *shape);
+extern int get_grid_spacing(void *fortran_bmi_handle, int *grid, double *spacing);
+extern int get_grid_origin(void *fortran_bmi_handle, int *grid, double *origin);
+extern int get_grid_x(void *fortran_bmi_handle, int *grid, double *x);
+extern int get_grid_y(void *fortran_bmi_handle, int *grid, double *y);
+extern int get_grid_z(void *fortran_bmi_handle, int *grid, double *z);
+extern int get_grid_node_count(void *fortran_bmi_handle, int *grid, int *count);
+extern int get_grid_edge_count(void *fortran_bmi_handle, int *grid, int *count);
+extern int get_grid_face_count(void *fortran_bmi_handle, int *grid, int *count);
+extern int get_grid_edge_nodes(void *fortran_bmi_handle, int *grid, int *edge_nodes);
+extern int get_grid_face_edges(void *fortran_bmi_handle, int *grid, int *face_edges);
+extern int get_grid_face_nodes(void *fortran_bmi_handle, int *grid, int *face_nodes);
+extern int get_grid_nodes_per_face(void *fortran_bmi_handle, int *grid, int *nodes_per_face);
 
-/**
- * Have the backing BMI model update to the specified time.
+/* The following functions are not currently implemented in the Fortran iso_c_binding middleware, and as such
+ * not declared here.  This is not a problem, since it is fairly easy to work around their absence using the primary
+ * getter and setter functions.
  *
- * Update the backing BMI model to some desired model time, specified either explicitly or implicitly as a
- * non-integral multiple of time steps.  Note that the former is supported, but not required, by the BMI
- * specification.  The same is true for negative argument values.
- *
- * This function does not attempt to determine whether the particular backing model will consider the
- * provided parameter valid.
- *
- * @param time Time to update model to, either as literal model time or non-integral multiple of time steps.
+ * They can be added if needed/possible in the future, but implementations must be added to the middleware before
+ * these declarations will be valid.
  */
-void Bmi_Fortran_Adapter::UpdateUntil(double time) {
-    if (update_until(&bmi_model->handle, &time) != BMI_SUCCESS) {
-        throw models::external::State_Exception("Model execution update to specified time failed for " + model_name);
+// extern int get_value_ptr_int(void *fortran_bmi_handle, const char *name, int *dest);
+// extern int get_value_ptr_float(void *fortran_bmi_handle, const char *name, float *dest);
+// extern int get_value_ptr_double(void *fortran_bmi_handle, const char *name, double *dest);
+// extern int get_value_at_indices_int(void *fortran_bmi_handle, const char *name, int *dest, int indices);
+// extern int get_value_at_indices_float(void *fortran_bmi_handle, const char *name, float *dest, int indices);
+// extern int get_value_at_indices_double(void *fortran_bmi_handle, const char *name, double *dest, int indices);
+// extern int set_value_at_indices_int(void *fortran_bmi_handle, const char *name, int indices, int *src);
+// extern int set_value_at_indices_float(void *fortran_bmi_handle, const char *name, int indices, float *src);
+// extern int set_value_at_indices_double(void *fortran_bmi_handle, const char *name, int indices, double *src);
+} // extern "C"
+
+namespace ngen {
+
+using Adapter = Bmi_Fortran_Adapter;
+
+void Adapter::construct_backing_model()
+{
+    using registration_func_t = void* (*)(void*);
+    auto register_ = reinterpret_cast<registration_func_t>(this->registration());
+    register_(ptr_);
+}
+
+void Adapter::Initialize(std::string config_file)
+{
+    BMI_THROW_ON_FAILURE(
+        initialize(ptr_, config_file.c_str()),
+        "Failed to initialize Bmi_Fortran_Adapter with file '" + config_file + "'."
+    );
+
+    Bmi_Adapter::set_initialized();
+}
+
+void Adapter::Update()
+{
+    BMI_THROW_ON_FAILURE(
+        update(ptr_),
+        "Failed to update Bmi_C_Adapter."
+    );
+}
+
+void Adapter::UpdateUntil(double time)
+{
+    BMI_THROW_ON_FAILURE(
+        update_until(ptr_, &time),
+        "Failed to update Bmi_C_Adapter until time '" + std::to_string(time) + "'."
+    );
+}
+
+void Adapter::Finalize()
+{
+    finalize(ptr_); // Throw on failure?
+}
+
+std::string Adapter::GetComponentName()
+{
+    std::array<char, bmi::MAX_COMPONENT_NAME> name;
+
+    BMI_THROW_ON_FAILURE(
+        get_component_name(ptr_, name.data()),
+        "Failed to get component name for Bmi_C_Adapter."
+    );
+
+    return { name.data() };
+}
+
+int Adapter::GetInputItemCount()
+{
+    int item_count = 0;
+
+    BMI_THROW_ON_FAILURE(
+        get_input_item_count(ptr_, &item_count),
+        "Failed to get input item count for Bmi_C_Adapter."
+    );
+
+    return item_count;
+}
+
+int Adapter::GetOutputItemCount()
+{
+    int item_count = 0;
+
+    BMI_THROW_ON_FAILURE(
+        get_output_item_count(ptr_, &item_count),
+        "Failed to get output item count for Bmi_C_Adapter."
+    );
+
+    return item_count;
+}
+
+
+std::vector<std::string> GetVarName(void* ptr, int (*func)(void*, char**), int count, bool is_input)
+{
+    std::vector<char*> names(count);
+
+    for (int i = 0; i < count; ++i)
+        names[i] = new char[bmi::MAX_VAR_NAME];
+
+    BMI_THROW_ON_FAILURE(
+        func(ptr, names.data()),
+        "Failed to get " + std::string{is_input ? "input" : "output"} + " variable names for Bmi_C_Adapter"
+    );
+
+    std::vector<std::string> result;
+    result.reserve(count);
+
+    for (int i = 0; i < count; ++i) {
+        result.emplace_back(names[i]);
+        delete[] names[i];
+    }
+
+    return result;
+}
+
+std::vector<std::string> Adapter::GetInputVarNames()
+{
+    return GetVarName(ptr_, get_input_var_names, GetInputItemCount(), true);
+}
+
+std::vector<std::string> Adapter::GetOutputVarNames()
+{
+    return GetVarName(ptr_, get_output_var_names, GetOutputItemCount(), false);
+}
+
+int Adapter::GetVarGrid(std::string name)
+{
+    int grid_id = -1;
+    BMI_THROW_ON_FAILURE(
+        get_var_grid(ptr_, name.c_str(), &grid_id),
+        "Failed to get var grid for variable " + name + " in Bmi_C_Adapter"
+    );
+    return grid_id;
+}
+
+std::string Adapter::GetVarType(std::string name)
+{
+    std::array<char, bmi::MAX_TYPE_NAME> var_type;
+    BMI_THROW_ON_FAILURE(
+        get_var_type(ptr_, name.c_str(), var_type.data()),
+        "Failed to get type for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { var_type.data() };
+}
+
+std::string Adapter::GetVarUnits(std::string name)
+{
+    std::array<char, bmi::MAX_UNITS_NAME> units_name;
+    BMI_THROW_ON_FAILURE(
+        get_var_units(ptr_, name.c_str(), units_name.data()),
+        "Failed to get units for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { units_name.data() };
+}
+
+int Adapter::GetVarItemsize(std::string name)
+{
+    int item_size = -1;
+    BMI_THROW_ON_FAILURE(
+        get_var_itemsize(ptr_, name.c_str(), &item_size),
+        "Failed to get item size for variable " + name + " in Bmi_C_Adapter"
+    );
+    return item_size;
+}
+
+int Adapter::GetVarNbytes(std::string name)
+{
+    int nbytes = -1;
+    BMI_THROW_ON_FAILURE(
+        get_var_nbytes(ptr_, name.c_str(), &nbytes),
+        "Failed to get nbytes for variable " + name + " in Bmi_C_Adapter"
+    );
+    return nbytes;
+}
+
+std::string Adapter::GetVarLocation(std::string name)
+{
+    std::array<char, bmi::MAX_LOCATION_NAME> loc;
+    BMI_THROW_ON_FAILURE(
+        get_var_location(ptr_, name.c_str(), loc.data()),
+        "Failed to get location for variable " + name + " in Bmi_C_Adapter"
+    );
+    return { loc.data() };
+}
+
+double Adapter::GetCurrentTime()
+{
+    double current = -1;
+    BMI_THROW_ON_FAILURE(
+        get_current_time(ptr_, &current),
+        "Failed to get current time in Bmi_C_Adapter"
+    );
+    return current;
+}
+
+double Adapter::GetStartTime()
+{
+    double start = -1;
+    BMI_THROW_ON_FAILURE(
+        get_start_time(ptr_, &start),
+        "Failed to get start time in Bmi_C_Adapter"
+    );
+    return start;
+}
+
+double Adapter::GetEndTime()
+{
+    double end = -1;
+    BMI_THROW_ON_FAILURE(
+        get_end_time(ptr_, &end),
+        "Failed to get end time in Bmi_C_Adapter"
+    );
+    return end;
+}
+
+std::string Adapter::GetTimeUnits()
+{
+    std::array<char, bmi::MAX_UNITS_NAME> units;
+    BMI_THROW_ON_FAILURE(
+        get_time_units(ptr_, units.data()),
+        "Failed to get time units in Bmi_C_Adapter"
+    );
+    return { units.data() };
+}
+double Adapter::GetTimeStep()
+{
+    double step = -1;
+    BMI_THROW_ON_FAILURE(
+        get_time_step(ptr_, &step),
+        "Failed to get time step in Bmi_C_Adapter"
+    );
+    return step;
+}
+
+void Adapter::GetValue(std::string name, void *dest)
+{
+    auto type = GetVarType(name);
+
+    int result = -1;
+    if (type == "int" || type == "integer") {
+        result = get_value_int(ptr_, name.c_str(), static_cast<int*>(dest));
+    } else if (type == "float" || type == "real") {
+        result = get_value_float(ptr_, name.c_str(), static_cast<float*>(dest));
+    } else if (type == "double" || type == "double precision") {
+        result = get_value_double(ptr_, name.c_str(), static_cast<double*>(dest));
+    } else {
+        throw std::runtime_error{"Unsupported type '" + type + "' for variable " + name + " in Bmi_Fortran_Adapter"};
+    }
+
+    if (result != bmi::BMI_SUCCESS) {
+        throw std::runtime_error{"Failed to get variable " + name + " of type '" + type + "' in Bmi_Fortran_Adapter"};
     }
 }
 
-void Bmi_Fortran_Adapter::GetGridShape(int grid, int *shape) {
-    if (get_grid_shape(&bmi_model->handle, &grid, shape) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " shape.");
+void *Adapter::GetValuePtr(std::string name)
+{
+    throw std::runtime_error{"Fortran BMI module integration does not currently support getting value pointers"};
+}
+
+void Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count)
+{
+    throw std::runtime_error{"Fortran BMI module integration does not currently support getting values by index"};
+}
+
+void Adapter::SetValue(std::string name, void *src)
+{
+    auto type = GetVarType(name);
+
+    int result = -1;
+    if (type == "int" || type == "integer") {
+        result = set_value_int(ptr_, name.c_str(), static_cast<int*>(src));
+    } else if (type == "float" || type == "real") {
+        result = set_value_float(ptr_, name.c_str(), static_cast<float*>(src));
+    } else if (type == "double" || type == "double precision") {
+        result = set_value_double(ptr_, name.c_str(), static_cast<double*>(src));
+    } else {
+        throw std::runtime_error{"Unsupported type '" + type + "' for variable " + name + " in Bmi_Fortran_Adapter"};
+    }
+
+    if (result != bmi::BMI_SUCCESS) {
+        throw std::runtime_error{"Failed to set variable " + name + " of type '" + type + "' in Bmi_Fortran_Adapter"};
     }
 }
 
-void Bmi_Fortran_Adapter::GetGridSpacing(int grid, double *spacing) {
-    if (get_grid_spacing(&bmi_model->handle, &grid, spacing) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " spacing.");
-    }
+void Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src)
+{
+    throw std::runtime_error{"Fortran BMI module integration does not currently support setting values by index"};
 }
 
-void Bmi_Fortran_Adapter::GetGridOrigin(int grid, double *origin) {
-    if (get_grid_origin(&bmi_model->handle, &grid, origin) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " origin.");
-    }
+int Adapter::GetGridRank(int grid)
+{
+    int grid_rank = 0;
+    BMI_THROW_ON_FAILURE(
+        get_grid_rank(ptr_, &grid, &grid_rank),
+        "Failed to get rank of grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
+    return grid_rank;
 }
 
-void Bmi_Fortran_Adapter::GetGridX(int grid, double *x) {
-    if (get_grid_x(&bmi_model->handle, &grid, x) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " x.");
-    }
+int Adapter::GetGridSize(int grid)
+{
+    int grid_size = 0;
+    BMI_THROW_ON_FAILURE(
+        get_grid_size(ptr_, &grid, &grid_size),
+        "Failed to get size of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+    return grid_size;
 }
 
-void Bmi_Fortran_Adapter::GetGridY(int grid, double *y) {
-    if (get_grid_y(&bmi_model->handle, &grid, y) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " y.");
-    }
+std::string Adapter::GetGridType(int grid)
+{
+    std::array<char, bmi::MAX_TYPE_NAME> grid_type;
+    BMI_THROW_ON_FAILURE(
+        get_grid_type(ptr_, &grid, grid_type.data()),
+        "Failed to get type of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+    return { grid_type.data() };
 }
 
-void Bmi_Fortran_Adapter::GetGridZ(int grid, double *z) {
-    if (get_grid_z(&bmi_model->handle, &grid, z) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " z.");
-    }
+void Adapter::GetGridShape(int grid, int *shape)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_shape(ptr_, &grid, shape),
+        "Failed to get shape of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-int Bmi_Fortran_Adapter::GetGridNodeCount(int grid) {
-    int count;
-    if (get_grid_node_count(&bmi_model->handle, &grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " node count.");
-    }
+void Adapter::GetGridSpacing(int grid, double *spacing)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_spacing(ptr_, &grid, spacing),
+        "Failed to get spacing of grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridOrigin(int grid, double *origin)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_origin(ptr_, &grid, origin),
+        "Failed to get origin for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridX(int grid, double *x)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_x(ptr_, &grid, x),
+        "Failed to get x for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridY(int grid, double *y)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_y(ptr_, &grid, y),
+        "Failed to get y for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+void Adapter::GetGridZ(int grid, double *z)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_z(ptr_, &grid, z),
+        "Failed to get z for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+
+int Adapter::GetGridNodeCount(int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        get_grid_node_count(ptr_, &grid, &count),
+        "Failed to get node count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-int Bmi_Fortran_Adapter::GetGridEdgeCount(int grid) {
-    int count;
-    if (get_grid_edge_count(&bmi_model->handle, &grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " edge count.");
-    }
+int Adapter::GetGridEdgeCount(int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        get_grid_edge_count(ptr_, &grid, &count),
+        "Failed to get edge count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-int Bmi_Fortran_Adapter::GetGridFaceCount(int grid) {
-    int count;
-    if (get_grid_face_count(&bmi_model->handle, &grid, &count) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face count.");
-    }
+int Adapter::GetGridFaceCount(int grid)
+{
+    int count = 0;
+    BMI_THROW_ON_FAILURE(
+        get_grid_face_count(ptr_, &grid, &count),
+        "Failed to get face count for grid " + std::to_string(grid) + " in Bmi_C_Adapter" 
+    );
     return count;
 }
 
-void Bmi_Fortran_Adapter::GetGridEdgeNodes(int grid, int *edge_nodes) {
-    if (get_grid_edge_nodes(&bmi_model->handle, &grid, edge_nodes) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " edge nodes.");
-    }
+void Adapter::GetGridEdgeNodes(int grid, int *edge_nodes)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_edge_nodes(ptr_, &grid, edge_nodes),
+        "Failed to get edge nodes for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridFaceEdges(int grid, int *face_edges)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_face_edges(ptr_, &grid, face_edges),
+        "Failed to get face edges for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridFaceNodes(int grid, int *face_nodes)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_face_nodes(ptr_, &grid, face_nodes),
+        "Failed to get face nodes for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
+}
+void Adapter::GetGridNodesPerFace(int grid, int *nodes_per_face)
+{
+    BMI_THROW_ON_FAILURE(
+        get_grid_nodes_per_face(ptr_, &grid, nodes_per_face),
+        "Failed to get nodes per face for grid " + std::to_string(grid) + " in Bmi_C_Adapter"
+    );
 }
 
-void Bmi_Fortran_Adapter::GetGridFaceEdges(int grid, int *face_edges) {
-    if (get_grid_face_edges(&bmi_model->handle, &grid, face_edges) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face edges.");
-    }
-}
-
-void Bmi_Fortran_Adapter::GetGridFaceNodes(int grid, int *face_nodes) {
-    if (get_grid_face_nodes(&bmi_model->handle, &grid, face_nodes) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " face nodes.");
-    }
-}
-
-void Bmi_Fortran_Adapter::GetGridNodesPerFace(int grid, int *nodes_per_face) {
-    if (get_grid_nodes_per_face(&bmi_model->handle, &grid, nodes_per_face) != BMI_SUCCESS) {
-        throw std::runtime_error(model_name + " failed to get grid " + std::to_string(grid) + " nodes per face.");
-    }
-}
-
-#endif // NGEN_WITH_BMI_FORTRAN
+} // namespace ngen

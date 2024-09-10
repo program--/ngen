@@ -1,227 +1,221 @@
 #include "bmi/Bmi_Cpp_Adapter.hpp"
 
-#include <exception>
-#include <utility>
-#include <iostream>
+namespace ngen {
 
-using namespace models::bmi;
+using Adapter = Bmi_Cpp_Adapter;
 
-Bmi_Cpp_Adapter::Bmi_Cpp_Adapter(const std::string& type_name, std::string library_file_path,
-                             bool has_fixed_time_step,
-                             std::string creator_func, std::string destroyer_func)
-        : Bmi_Cpp_Adapter(type_name, std::move(library_file_path), "",
-                        has_fixed_time_step, creator_func, destroyer_func) { }
-
-Bmi_Cpp_Adapter::Bmi_Cpp_Adapter(const std::string& type_name, std::string library_file_path, std::string bmi_init_config,
-                             bool has_fixed_time_step,
-                             std::string creator_func, std::string destroyer_func)
-        : Bmi_Cpp_Adapter(type_name, std::move(library_file_path), std::move(bmi_init_config),
-                        has_fixed_time_step,
-                        std::move(creator_func), std::move(destroyer_func), true) { }
-
-Bmi_Cpp_Adapter::Bmi_Cpp_Adapter(const std::string& type_name, std::string library_file_path, std::string bmi_init_config,
-                             bool has_fixed_time_step,
-                             std::string creator_func, std::string destroyer_func,
-                             bool do_initialization)
-                             : AbstractCLibBmiAdapter(type_name, library_file_path, std::move(bmi_init_config),
-                             has_fixed_time_step, creator_func),
-                             model_create_fname(std::move(creator_func)),
-                             model_destroy_fname(std::move(destroyer_func))
-                             //TODO: We are passing creator_func as registration_func because AbstractCLibBmiAdapter expects it to exist, but are not using it the same way...may be okay but we may want to generalize that assumption out!
+void Adapter::construct_backing_model()
 {
-    if (do_initialization) {
-        try {
-            construct_and_init_backing_model_for_type();
-            // Make sure this is set to 'true' after this function call finishes
-            model_initialized = true;
-            bmi_model_time_convert_factor = get_time_convert_factor();
-        }
-        // Record the exception message before re-throwing to handle subsequent function calls properly
-        catch (const std::exception &e) {
-            std::clog << e.what() << std::endl;
-            model_initialized = true;
-            throw e;
-        }
-        catch (...) {
-            const std::exception_ptr& e = std::current_exception();
-            // Make sure this is set to 'true' after this function call finishes
-            //TODO: This construct may not be necessary for the C++ adapter because the shared_ptr has a lambda set up to destroy the model?
-            model_initialized = true;
-            throw e;
-        }
-    }
+    using registration_func_t = ::bmi::Bmi* (*)();
+    auto register_ = reinterpret_cast<registration_func_t>(this->registration());
+    ptr_ = std::unique_ptr<bmi::Bmi>{ register_() };
 }
 
-// TODO: since the dynamically loaded lib and model struct can't easily be copied (without risking breaking once
-//  original object closes the handle for its dynamically loaded lib) it make more sense to remove the copy constructor.
-// TODO: However, it may make sense to bring it back once it is possible to serialize and deserialize the model.
-/*
-Bmi_Cpp_Adapter::Bmi_Cpp_Adapter(Bmi_Cpp_Adapter &adapter) :
-                                                       bmi_init_config(adapter.bmi_init_config),
-                                                       bmi_lib_file(adapter.bmi_lib_file),
-                                                       bmi_model(adapter.bmi_model),
-                                                       bmi_model_has_fixed_time_step(
-                                                               adapter.bmi_model_has_fixed_time_step),
-                                                       bmi_model_time_convert_factor(
-                                                               adapter.bmi_model_time_convert_factor),
-                                                       bmi_registration_function(adapter.bmi_registration_function),
-                                                       init_exception_msg(adapter.init_exception_msg),
-                                                       input_var_names(adapter.input_var_names),
-                                                       model_initialized(adapter.model_initialized),
-                                                       output_var_names(adapter.output_var_names),
-                                                       output(std::move(adapter.output))
+void Adapter::Initialize(std::string config_file)
 {
-    // TODO: simple copying of the open dynamic library handle may lead to unexpected behavior, so perhaps open new?
+    ptr_->Initialize(std::move(config_file));
 
-    // TODO: for that matter, copying the model struct as was done before probably is not valid and should really
-         involve serialization/deserialization.
-}
-*/
-
-std::string Bmi_Cpp_Adapter::GetComponentName() {
-    return bmi_model->GetComponentName();
+    Bmi_Adapter::set_initialized();
 }
 
-double Bmi_Cpp_Adapter::GetCurrentTime() {
-    return bmi_model->GetCurrentTime();
+void Adapter::Update()
+{
+    ptr_->Update();
 }
 
-double Bmi_Cpp_Adapter::GetEndTime() {
-    return bmi_model->GetEndTime();
+void Adapter::UpdateUntil(double time)
+{
+    ptr_->UpdateUntil(time);
 }
 
-int Bmi_Cpp_Adapter::GetInputItemCount() {
-    return bmi_model->GetInputItemCount();
+void Adapter::Finalize()
+{
+    ptr_->Finalize();
 }
 
-std::vector<std::string> Bmi_Cpp_Adapter::GetInputVarNames() {
-    return bmi_model->GetInputVarNames();
+std::string Adapter::GetComponentName()
+{
+    return ptr_->GetComponentName();
 }
 
-int Bmi_Cpp_Adapter::GetOutputItemCount() {
-    return bmi_model->GetOutputItemCount();
+int Adapter::GetInputItemCount()
+{
+    return ptr_->GetInputItemCount();
 }
 
-std::vector<std::string> Bmi_Cpp_Adapter::GetOutputVarNames() {
-    return bmi_model->GetOutputVarNames();
+int Adapter::GetOutputItemCount()
+{
+    return ptr_->GetOutputItemCount();
 }
 
-double Bmi_Cpp_Adapter::GetStartTime() {
-    return bmi_model->GetStartTime();
+std::vector<std::string> Adapter::GetInputVarNames()
+{
+    return ptr_->GetInputVarNames();
 }
 
-std::string Bmi_Cpp_Adapter::GetTimeUnits() {
-    return bmi_model->GetTimeUnits();
+std::vector<std::string> Adapter::GetOutputVarNames()
+{
+    return ptr_->GetOutputVarNames();
 }
 
-void Bmi_Cpp_Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count) {
-    return bmi_model->GetValueAtIndices(name, dest, inds, count);
+int Adapter::GetVarGrid(std::string name)
+{
+    return ptr_->GetVarGrid(std::move(name));
 }
 
-int Bmi_Cpp_Adapter::GetVarItemsize(std::string name) {
-    return bmi_model->GetVarItemsize(name);
+std::string Adapter::GetVarType(std::string name)
+{
+    return ptr_->GetVarType(std::move(name));
 }
 
-int Bmi_Cpp_Adapter::GetVarNbytes(std::string name) {
-    return bmi_model->GetVarNbytes(name);
+std::string Adapter::GetVarUnits(std::string name)
+{
+    return ptr_->GetVarUnits(std::move(name));
 }
 
-std::string Bmi_Cpp_Adapter::GetVarType(std::string name) {
-    return bmi_model->GetVarType(name);
+int Adapter::GetVarItemsize(std::string name)
+{
+    return ptr_->GetVarItemsize(std::move(name));
 }
 
-std::string Bmi_Cpp_Adapter::GetVarUnits(std::string name) {
-    return bmi_model->GetVarUnits(name);
+int Adapter::GetVarNbytes(std::string name)
+{
+    return ptr_->GetVarNbytes(std::move(name));
 }
 
-std::string Bmi_Cpp_Adapter::GetVarLocation(std::string name) {
-    return bmi_model->GetVarLocation(name);
+std::string Adapter::GetVarLocation(std::string name)
+{
+    return ptr_->GetVarLocation(std::move(name));
 }
 
-int Bmi_Cpp_Adapter::GetVarGrid(std::string name) {
-    return bmi_model->GetVarGrid(name);
+double Adapter::GetCurrentTime()
+{
+    return ptr_->GetCurrentTime();
 }
 
-std::string Bmi_Cpp_Adapter::GetGridType(int grid_id) {
-    return bmi_model->GetGridType(grid_id);
+double Adapter::GetStartTime()
+{
+    return ptr_->GetStartTime();
 }
 
-int Bmi_Cpp_Adapter::GetGridRank(int grid_id) {
-    return bmi_model->GetGridRank(grid_id);
+double Adapter::GetEndTime()
+{
+    return ptr_->GetEndTime();
 }
 
-int Bmi_Cpp_Adapter::GetGridSize(int grid_id) {
-    return bmi_model->GetGridSize(grid_id);
+std::string Adapter::GetTimeUnits()
+{
+    return ptr_->GetTimeUnits();
 }
 
-void Bmi_Cpp_Adapter::SetValue(std::string name, void *src) {
-    bmi_model->SetValue(name, src);
+double Adapter::GetTimeStep()
+{
+    return ptr_->GetTimeStep();
 }
 
-bool Bmi_Cpp_Adapter::is_model_initialized() {
-    return model_initialized;
+void Adapter::GetValue(std::string name, void *dest)
+{
+    ptr_->GetValue(std::move(name), dest);
 }
 
-void Bmi_Cpp_Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src) {
-    bmi_model->SetValueAtIndices(name, inds, count, src);
+void* Adapter::GetValuePtr(std::string name)
+{
+    return ptr_->GetValuePtr(std::move(name));
 }
 
-void Bmi_Cpp_Adapter::Update() {
-    bmi_model->Update();
+void Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count)
+{
+    ptr_->GetValueAtIndices(std::move(name), dest, inds, count);
 }
 
-void Bmi_Cpp_Adapter::UpdateUntil(double time) {
-    bmi_model->UpdateUntil(time);
+void Adapter::SetValue(std::string name, void *src)
+{
+    ptr_->SetValue(std::move(name), src);
 }
 
-void Bmi_Cpp_Adapter::GetGridShape(const int grid, int *shape) {
-    bmi_model->GetGridShape(grid, shape);
+void Adapter::SetValueAtIndices(std::string name, int *inds, int count, void *src)
+{
+    ptr_->SetValueAtIndices(std::move(name), inds, count, src);
 }
 
-void Bmi_Cpp_Adapter::GetGridSpacing(const int grid, double *spacing) {
-    bmi_model->GetGridSpacing(grid, spacing);
+int Adapter::GetGridRank(const int grid)
+{
+    return ptr_->GetGridRank(grid);
 }
 
-void Bmi_Cpp_Adapter::GetGridOrigin(const int grid, double *origin) {
-    bmi_model->GetGridOrigin(grid, origin);
+int Adapter::GetGridSize(const int grid)
+{
+    return ptr_->GetGridSize(grid);
 }
 
-void Bmi_Cpp_Adapter::GetGridX(const int grid, double *x) {
-    bmi_model->GetGridX(grid, x);
+std::string Adapter::GetGridType(const int grid)
+{
+    return ptr_->GetGridType(grid);
 }
 
-void Bmi_Cpp_Adapter::GetGridY(const int grid, double *y) {
-    bmi_model->GetGridY(grid, y);
+void Adapter::GetGridShape(const int grid, int *shape)
+{
+    ptr_->GetGridShape(grid, shape);
 }
 
-void Bmi_Cpp_Adapter::GetGridZ(const int grid, double *z) {
-    bmi_model->GetGridZ(grid, z);
+void Adapter::GetGridSpacing(const int grid, double *spacing)
+{
+    ptr_->GetGridSpacing(grid, spacing);
 }
 
-int Bmi_Cpp_Adapter::GetGridNodeCount(const int grid) {
-    return bmi_model->GetGridNodeCount(grid);
+void Adapter::GetGridOrigin(const int grid, double *origin)
+{
+    ptr_->GetGridOrigin(grid, origin);
 }
 
-int Bmi_Cpp_Adapter::GetGridEdgeCount(const int grid) {
-    return bmi_model->GetGridEdgeCount(grid);
+void Adapter::GetGridX(const int grid, double *x)
+{
+    ptr_->GetGridX(grid, x);
 }
 
-int Bmi_Cpp_Adapter::GetGridFaceCount(const int grid) {
-    return bmi_model->GetGridFaceCount(grid);
+void Adapter::GetGridY(const int grid, double *y)
+{
+    ptr_->GetGridY(grid, y);
 }
 
-void Bmi_Cpp_Adapter::GetGridEdgeNodes(const int grid, int *edge_nodes) {
-    bmi_model->GetGridEdgeNodes(grid, edge_nodes);
+void Adapter::GetGridZ(const int grid, double *z)
+{
+    ptr_->GetGridZ(grid, z);
 }
 
-void Bmi_Cpp_Adapter::GetGridFaceEdges(const int grid, int *face_edges) {
-    bmi_model->GetGridFaceEdges(grid, face_edges);
+int Adapter::GetGridNodeCount(const int grid)
+{
+    return ptr_->GetGridNodeCount(grid);
 }
 
-void Bmi_Cpp_Adapter::GetGridFaceNodes(const int grid, int *face_nodes) {
-    bmi_model->GetGridFaceNodes(grid, face_nodes);
+int Adapter::GetGridEdgeCount(const int grid)
+{
+    return ptr_->GetGridEdgeCount(grid);
 }
 
-void Bmi_Cpp_Adapter::GetGridNodesPerFace(const int grid, int *nodes_per_face) {
-    bmi_model->GetGridNodesPerFace(grid, nodes_per_face);
+int Adapter::GetGridFaceCount(const int grid)
+{
+    return ptr_->GetGridFaceCount(grid);
 }
+
+void Adapter::GetGridEdgeNodes(const int grid, int *edge_nodes)
+{
+    ptr_->GetGridEdgeNodes(grid, edge_nodes);
+}
+
+void Adapter::GetGridFaceEdges(const int grid, int *face_edges)
+{
+    ptr_->GetGridFaceEdges(grid, face_edges);
+}
+
+void Adapter::GetGridFaceNodes(const int grid, int *face_nodes)
+{
+    ptr_->GetGridFaceNodes(grid, face_nodes);
+}
+
+void Adapter::GetGridNodesPerFace(const int grid, int *nodes_per_face)
+{
+    ptr_->GetGridNodesPerFace(grid, nodes_per_face);
+}
+
+} // namespace ngen
